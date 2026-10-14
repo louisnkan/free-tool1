@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>WhatsApp Link Maker</title>
+<style>
+  :root {
+    --bg: #0b1210;
+    --card: #131c19;
+    --border: #22302b;
+    --text: #e8f1ee;
+    --muted: #8fa39c;
+    --green: #25d366;
+    --green-dark: #1da851;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    min-height: 100vh;
+  }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 8px 0 4px; }
+  h1 span { color: var(--green); }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: .95rem; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+  }
+  label { display: block; font-weight: 600; margin: 0 0 6px; font-size: .95rem; }
+  .opt { color: var(--muted); font-weight: 400; }
+  input, textarea {
+    width: 100%;
+    background: #0d1513;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    font: inherit;
+    font-size: 16px; /* prevents iOS zoom */
+    outline: none;
+  }
+  textarea { resize: vertical; min-height: 96px; }
+  input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(37,211,102,.18); }
+  input.invalid { border-color: var(--danger); }
+  .field { margin-bottom: 16px; }
+  .hint { color: var(--muted); font-size: .8rem; margin-top: 6px; }
+  .error { color: var(--danger); font-size: .85rem; margin-top: 6px; min-height: 1.2em; }
+  .output-label { margin-top: 4px; }
+  .output {
+    background: #0d1513;
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .85rem;
+    color: var(--green);
+    min-height: 52px;
+  }
+  .output.empty { color: var(--muted); font-family: inherit; }
+  .buttons { display: flex; gap: 10px; margin-top: 14px; }
+  button {
+    flex: 1;
+    border: 0;
+    border-radius: 12px;
+    padding: 14px;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    min-height: 48px;
+  }
+  button.primary { background: var(--green); color: #04210f; }
+  button.primary:active { background: var(--green-dark); }
+  button.secondary { background: transparent; color: var(--green); border: 1.5px solid var(--green); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button:focus-visible { outline: 3px solid rgba(37,211,102,.5); outline-offset: 2px; }
+  .status { text-align: center; color: var(--green); font-size: .85rem; min-height: 1.3em; margin-top: 10px; }
+  .privacy { color: var(--muted); font-size: .78rem; text-align: center; margin-top: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>WhatsApp <span>Link Maker</span></h1>
+  <p class="sub">Make a click-to-chat link customers can tap to message you.</p>
+
+  <div class="card">
+    <div class="field">
+      <label for="phone">WhatsApp number</label>
+      <input id="phone" type="tel" inputmode="tel" autocomplete="off" placeholder="08000000000" aria-describedby="phoneError">
+      <div class="hint">Nigerian (0800…) or international (+234800…). Spaces and dashes are fine.</div>
+      <div class="error" id="phoneError" role="alert"></div>
+    </div>
+
+    <div class="field">
+      <label for="msg">Pre-filled message <span class="opt">(optional)</span></label>
+      <textarea id="msg" placeholder="Hi! I'd like to order…"></textarea>
+    </div>
+
+    <label class="output-label">Your link</label>
+    <div class="output empty" id="output">Your link will appear here.</div>
+
+    <div class="buttons">
+      <button class="primary" id="copyBtn" disabled>Copy link</button>
+      <button class="secondary" id="testBtn" disabled>Test link</button>
+    </div>
+    <div class="status" id="status" aria-live="polite"></div>
+  </div>
+
+  <p class="privacy">Everything runs on your device. Nothing is saved, sent or collected.</p>
+</main>
+
+<script>
+(function () {
+  var phoneEl = document.getElementById('phone');
+  var msgEl = document.getElementById('msg');
+  var errEl = document.getElementById('phoneError');
+  var outEl = document.getElementById('output');
+  var copyBtn = document.getElementById('copyBtn');
+  var testBtn = document.getElementById('testBtn');
+  var statusEl = document.getElementById('status');
+  var currentLink = '';
+  var statusTimer;
+
+  function normalizePhone(raw) {
+    var s = raw.trim();
+    if (!s) return { empty: true };
+
+    if (/[^\d\s\-+().]/.test(s)) {
+      return { error: 'Use digits only. Spaces, dashes and + are fine, but letters and symbols are not.' };
+    }
+
+    var digits = s.replace(/\D/g, '');
+    if (!digits) return { error: 'Please enter a phone number.' };
+
+    // 00 international prefix -> drop it
+    if (digits.indexOf('00') === 0) digits = digits.slice(2);
+    // +234(0)80... style -> drop the extra 0
+    else if (digits.indexOf('2340') === 0 && digits.length === 14) digits = '234' + digits.slice(4);
+    // Nigerian local format
+    else if (digits.charAt(0) === '0') {
+      if (digits.length !== 11) {
+        return { error: 'Nigerian numbers starting with 0 need 11 digits (like 08000000000). You entered ' + digits.length + '.' };
+      }
+      digits = '234' + digits.slice(1);
+    }
+
+    if (digits.indexOf('234') === 0) {
+      if (digits.length !== 13) {
+        return { error: 'A Nigerian number in +234 format needs 13 digits in total (like +2348000000000). You entered ' + digits.length + '.' };
+      }
+      return { number: digits };
+    }
+
+    if (digits.length < 8) return { error: 'That looks too short. Check the number and try again.' };
+    if (digits.length > 15) return { error: 'That looks too long. Phone numbers have at most 15 digits.' };
+    if (digits.length === 10 && /^[789]/.test(digits)) {
+      return { error: 'Add a 0 at the start (like 08000000000) or use the country code (+234).' };
+    }
+    return { number: digits };
+  }
+
+  function update() {
+    var res = normalizePhone(phoneEl.value);
+    var msg = msgEl.value.trim();
+
+    errEl.textContent = '';
+    phoneEl.classList.remove('invalid');
+    currentLink = '';
+
+    if (res.error) {
+      errEl.textContent = res.error;
+      phoneEl.classList.add('invalid');
+    } else if (res.number) {
+      currentLink = 'https://wa.me/' + res.number + (msg ? '?text=' + encodeURIComponent(msg) : '');
+    }
+
+    if (currentLink) {
+      outEl.textContent = currentLink;
+      outEl.classList.remove('empty');
+    } else {
+      outEl.textContent = 'Your link will appear here.';
+      outEl.classList.add('empty');
+    }
+    copyBtn.disabled = testBtn.disabled = !currentLink;
+  }
+
+  function flash(text) {
+    statusEl.textContent = text;
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(function () { statusEl.textContent = ''; }, 2500);
+  }
+
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  copyBtn.addEventListener('click', function () {
+    if (!currentLink) return;
+    var link = currentLink;
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(link).then(
+        function () { flash('Link copied ✓'); },
+        function () { flash(fallbackCopy(link) ? 'Link copied ✓' : 'Could not copy. Press and hold the link to copy it.'); }
+      );
+    } else {
+      flash(fallbackCopy(link) ? 'Link copied ✓' : 'Could not copy. Press and hold the link to copy it.');
+    }
+  });
+
+  testBtn.addEventListener('click', function () {
+    if (!currentLink) return;
+    window.open(currentLink, '_blank', 'noopener');
+  });
+
+  phoneEl.addEventListener('input', update);
+  msgEl.addEventListener('input', update);
+  update();
+})();
+</script>
+</body>
+</html>
